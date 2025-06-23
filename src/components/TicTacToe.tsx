@@ -9,12 +9,11 @@ type GameState = {
   winner: Player
   status: GameStatus
 }
-
 // Component for an individual square on the board
 const Square = ({ value, onClick }: { value: Player; onClick: () => void }) => {
   return (
     <button
-      className="w-20 h-20 border border-gray-400 text-3xl font-bold flex items-center justify-center
+      className="w-100 h-100 border border-gray-400 text-3xl font-bold flex items-center justify-center
                  bg-white text-black hover:bg-gray-100 transition-colors"
       onClick={onClick}
     >
@@ -31,6 +30,7 @@ const Board = ({ squares, onClick }: { squares: Player[]; onClick: (i: number) =
         <Square key={i} value={square} onClick={() => onClick(i)} />
       ))}
     </div>
+   
   )
 }
 
