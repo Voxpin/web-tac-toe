@@ -13,7 +13,7 @@ type GameState = {
 const Square = ({ value, onClick }: { value: Player; onClick: () => void }) => {
   return (
     <button
-      className="w-100 h-100 border border-gray-400 text-3xl font-bold flex items-center justify-center
+      className="aspect-square  border border-gray-400 text-6xl font-bold flex items-center justify-center
                  bg-white text-black hover:bg-gray-100 transition-colors"
       onClick={onClick}
     >
@@ -25,7 +25,7 @@ const Square = ({ value, onClick }: { value: Player; onClick: () => void }) => {
 // Component for the game board
 const Board = ({ squares, onClick }: { squares: Player[]; onClick: (i: number) => void }) => {
   return (
-    <div className="grid grid-cols-3 gap-1 w-fit mx-auto">
+    <div className="grid grid-cols-3 w-full max-w-sm gap-[5px] mx-auto">
       {squares.map((square, i) => (
         <Square key={i} value={square} onClick={() => onClick(i)} />
       ))}
@@ -175,6 +175,10 @@ export const TicTacToe = () => {
         >
           New Game
         </button>
+      </div>
+      <div className=" text-sm text-gray-600 text-center w-full pb-4">
+        <p>To play against other users, share this screen and take turns.</p>
+        <p className="mt-1">A future version will include online multiplayer!</p>
       </div>
     </div>
   )

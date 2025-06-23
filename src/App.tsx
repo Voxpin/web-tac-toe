@@ -18,10 +18,10 @@ function App() {
         )}
       </div>
 
-      <div className="mt-6 text-sm text-gray-600 text-center">
+      {/* <div className=" text-sm text-gray-600 text-center w-full pb-4">
         <p>To play against other users, share this screen and take turns.</p>
         <p className="mt-1">A future version will include online multiplayer!</p>
-      </div>
+      </div> */}
     </div>
   )
 }
