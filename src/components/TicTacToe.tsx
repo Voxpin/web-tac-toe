@@ -6,32 +6,37 @@ type Player = 'X' | 'O' | null
 type GameStatus = 'playing' | 'won' | 'draw' | 'waiting'
 type GameState = {
   board: Player[]
-  currentPlayer: Player
-  winner: Player
+  currentPlayer: number
+  winner: Player | number | null
   status: GameStatus
+  winningPattern?: number[] | null
 }
 
 // Types for multiplayer
 type RoomPlayer = {
   username: string
-  symbol: 'X' | 'O'
+  index: number
+  symbol?: string
+  color?: string
 }
 
 type MultiplayerState = {
   isConnected: boolean
   roomId: string | null
+  gameType: string
   isCreator: boolean
-  playerSymbol: 'X' | 'O' | null
+  playerIndex: number | null
+  playerInfo: any
   opponentName: string | null
   spectators: string[]
 }
 
 // Component for an individual square on the board
-const Square = ({ value, onClick }: { value: Player; onClick: () => void }) => {
+const Square = ({ value, onClick, highlight = false }: { value: Player; onClick: () => void; highlight?: boolean }) => {
   return (
     <button
-      className="aspect-square  border border-gray-400 text-6xl font-bold flex items-center justify-center
-                 bg-white text-black hover:bg-gray-100 transition-colors"
+      className={`aspect-square border border-gray-400 text-6xl font-bold flex items-center justify-center
+                 bg-white text-black hover:bg-gray-100 transition-colors ${highlight ? 'bg-yellow-200' : ''}`}
       onClick={onClick}
     >
       {value}
@@ -40,14 +45,26 @@ const Square = ({ value, onClick }: { value: Player; onClick: () => void }) => {
 }
 
 // Component for the game board
-const Board = ({ squares, onClick }: { squares: Player[]; onClick: (i: number) => void }) => {
+const Board = ({
+  squares,
+  onClick,
+  winningPattern
+}: {
+  squares: Player[];
+  onClick: (i: number) => void;
+  winningPattern?: number[] | null
+}) => {
   return (
     <div className="grid grid-cols-3 w-full max-w-sm gap-[5px] mx-auto">
       {squares.map((square, i) => (
-        <Square key={i} value={square} onClick={() => onClick(i)} />
+        <Square
+          key={i}
+          value={square}
+          onClick={() => onClick(i)}
+          highlight={winningPattern?.includes(i)}
+        />
       ))}
     </div>
-   
   )
 }
 
@@ -59,8 +76,10 @@ export const TicTacToe = () => {
   const [multiplayerState, setMultiplayerState] = useState<MultiplayerState>({
     isConnected: false,
     roomId: null,
+    gameType: 'tic-tac-toe',
     isCreator: false,
-    playerSymbol: null,
+    playerIndex: null,
+    playerInfo: null,
     opponentName: null,
     spectators: []
   })
@@ -74,19 +93,19 @@ export const TicTacToe = () => {
   // Game state
   const [gameState, setGameState] = useState<GameState>({
     board: Array(9).fill(null),
-    currentPlayer: 'X',
+    currentPlayer: 0,
     winner: null,
     status: 'playing'
   })
 
   // Player name state
-  const [players, setPlayers] = useState({
-    X: 'Player 1',
-    O: 'Player 2'
+  const [players, setPlayers] = useState<Record<number, string>>({
+    0: 'Player 1',
+    1: 'Player 2'
   })
 
   // Game message
-  const [gameMessage, setGameMessage] = useState<string>(`${players.X}'s turn`)
+  const [gameMessage, setGameMessage] = useState<string>(`${players[0]}'s turn`)
 
   // Connect to Socket.io server
   useEffect(() => {
@@ -118,11 +137,13 @@ export const TicTacToe = () => {
     if (!socket) return
 
     // Room created event
-    socket.on('roomCreated', ({ roomId, symbol, gameState: serverGameState }) => {
+    socket.on('roomCreated', ({ roomId, gameType, playerIndex, playerInfo, gameState: serverGameState }) => {
       setMultiplayerState(prev => ({
         ...prev,
         roomId,
-        playerSymbol: symbol,
+        gameType,
+        playerIndex,
+        playerInfo,
         isCreator: true
       }))
       setGameState(serverGameState)
@@ -130,39 +151,42 @@ export const TicTacToe = () => {
     })
 
     // Room joined event
-    socket.on('roomJoined', ({ roomId, symbol, gameState: serverGameState }) => {
+    socket.on('roomJoined', ({ roomId, gameType, playerIndex, playerInfo, gameState: serverGameState }) => {
       setMultiplayerState(prev => ({
         ...prev,
         roomId,
-        playerSymbol: symbol,
+        gameType,
+        playerIndex,
+        playerInfo,
         isCreator: false
       }))
       setGameState(serverGameState)
     })
 
     // Game start event
-    socket.on('gameStart', ({ gameState: serverGameState, players }) => {
+    socket.on('gameStart', ({ gameState: serverGameState, players: serverPlayers }) => {
       setGameState(serverGameState)
 
-      // Set player names based on server data
-      const opponentPlayer = players.find(p =>
-        p.symbol !== multiplayerState.playerSymbol
-      )
+      // Set player names and find opponent
+      const playerMap: Record<number, string> = {};
+      let opponentName = null;
 
-      if (opponentPlayer) {
-        setMultiplayerState(prev => ({
-          ...prev,
-          opponentName: opponentPlayer.username
-        }))
+      serverPlayers.forEach((player: RoomPlayer) => {
+        playerMap[player.index] = player.username;
 
-        setPlayers(prev => ({
-          ...prev,
-          X: players.find(p => p.symbol === 'X')?.username || 'Player X',
-          O: players.find(p => p.symbol === 'O')?.username || 'Player O'
-        }))
-      }
+        if (player.index !== multiplayerState.playerIndex) {
+          opponentName = player.username;
+        }
+      });
 
-      setGameMessage(`${serverGameState.currentPlayer === 'X' ? players.find(p => p.symbol === 'X')?.username : players.find(p => p.symbol === 'O')?.username}'s turn`)
+      setPlayers(playerMap);
+      setMultiplayerState(prev => ({
+        ...prev,
+        opponentName
+      }));
+
+      const currentPlayerName = playerMap[serverGameState.currentPlayer];
+      setGameMessage(`${currentPlayerName}'s turn`);
     })
 
     // Game state update event
@@ -170,12 +194,12 @@ export const TicTacToe = () => {
       setGameState(serverGameState)
 
       if (serverGameState.status === 'won') {
-        const winnerName = serverGameState.winner === 'X' ? players.X : players.O
+        const winnerName = players[serverGameState.winner as number];
         setGameMessage(`${winnerName} wins!`)
       } else if (serverGameState.status === 'draw') {
         setGameMessage("It's a draw!")
       } else {
-        const currentPlayerName = serverGameState.currentPlayer === 'X' ? players.X : players.O
+        const currentPlayerName = players[serverGameState.currentPlayer];
         setGameMessage(`${currentPlayerName}'s turn`)
       }
     })
@@ -186,7 +210,7 @@ export const TicTacToe = () => {
     })
 
     // Player disconnected event
-    socket.on('playerDisconnected', ({ username, gameState: serverGameState }) => {
+    socket.on('playerDisconnected', ({ username, playerIndex, gameState: serverGameState }) => {
       setGameState(serverGameState)
       setGameMessage(`${username} has disconnected. Waiting for them to rejoin...`)
     })
@@ -207,27 +231,33 @@ export const TicTacToe = () => {
     })
 
     // Handle joined as spectator
-    socket.on('joinedAsSpectator', ({ roomId, gameState: serverGameState, players }) => {
+    socket.on('joinedAsSpectator', ({ roomId, gameType, gameState: serverGameState, players: serverPlayers }) => {
       setMultiplayerState(prev => ({
         ...prev,
         roomId,
-        playerSymbol: null,
+        gameType,
+        playerIndex: null,
+        playerInfo: null,
         isCreator: false
       }))
 
-      setGameState(serverGameState)
-      setPlayers({
-        X: players.find(p => p.symbol === 'X')?.username || 'Player X',
-        O: players.find(p => p.symbol === 'O')?.username || 'Player O'
-      })
+      setGameState(serverGameState);
 
-      setGameMessage('You joined as a spectator')
+      // Set player names
+      const playerMap: Record<number, string> = {};
+      serverPlayers.forEach((player: RoomPlayer) => {
+        playerMap[player.index] = player.username;
+      });
+
+      setPlayers(playerMap);
+      setGameMessage('You joined as a spectator');
     })
 
     // Game reset event
     socket.on('gameReset', ({ gameState: serverGameState }) => {
       setGameState(serverGameState)
-      setGameMessage(`${players.X}'s turn`)
+      const currentPlayerName = players[serverGameState.currentPlayer];
+      setGameMessage(`${currentPlayerName}'s turn`)
     })
 
     // Cleanup
@@ -243,12 +273,12 @@ export const TicTacToe = () => {
       socket.off('joinedAsSpectator')
       socket.off('gameReset')
     }
-  }, [socket, players, multiplayerState.playerSymbol])
+  }, [socket, players, multiplayerState.playerIndex])
 
   // Functions for multiplayer
   const createRoom = () => {
     if (!socket || !username) return
-    socket.emit('createRoom', { username })
+    socket.emit('createRoom', { username, gameType: 'tic-tac-toe' })
   }
 
   const joinRoom = () => {
@@ -256,43 +286,43 @@ export const TicTacToe = () => {
     socket.emit('joinRoom', { roomId: roomIdInput, username })
   }
 
-  // Check for a winner
-  useEffect(() => {
-    checkWinner()
-  }, [gameState.board])
-
   // Handle square click
   const handleClick = (i: number) => {
     // Don't allow moves after game is over or on filled squares
-    if (gameState.status !== 'playing' || gameState.board[i]) return
+    if (gameState.status !== 'playing' || (gameState.board as any)[i]) return
 
     // In multiplayer mode, only allow clicks if it's your turn and you're a player (not spectator)
     if (socket && multiplayerState.roomId) {
       // Check if it's not your turn
-      if (gameState.currentPlayer !== multiplayerState.playerSymbol) {
+      if (gameState.currentPlayer !== multiplayerState.playerIndex) {
         return
       }
 
       // Send move to server
-      socket.emit('makeMove', { roomId: multiplayerState.roomId, index: i })
+      socket.emit('makeMove', {
+        roomId: multiplayerState.roomId,
+        move: { index: i }  // Format the move based on the game type
+      })
       return
     }
 
     // Local gameplay (no multiplayer)
     const newBoard = [...gameState.board]
-    newBoard[i] = gameState.currentPlayer
+    newBoard[i] = gameState.currentPlayer === 0 ? 'X' : 'O'
 
     setGameState({
       ...gameState,
       board: newBoard,
-      currentPlayer: gameState.currentPlayer === 'X' ? 'O' : 'X',
+      currentPlayer: gameState.currentPlayer === 0 ? 1 : 0,
     })
 
-    setGameMessage(`${gameState.currentPlayer === 'X' ? players.O : players.X}'s turn`)
+    setGameMessage(`${players[gameState.currentPlayer === 0 ? 1 : 0]}'s turn`)
   }
 
-  // Check if there's a winner
-  const checkWinner = () => {
+  // Check if there's a winner (for local play only)
+  useEffect(() => {
+    if (socket && multiplayerState.roomId) return; // Skip for multiplayer games
+
     const winPatterns = [
       [0, 1, 2], [3, 4, 5], [6, 7, 8], // rows
       [0, 3, 6], [1, 4, 7], [2, 5, 8], // columns
@@ -306,11 +336,12 @@ export const TicTacToe = () => {
       if (board[a] && board[a] === board[b] && board[a] === board[c]) {
         setGameState({
           ...gameState,
-          winner: board[a],
-          status: 'won'
+          winner: board[a] === 'X' ? 0 : 1,
+          status: 'won',
+          winningPattern: pattern
         })
 
-        setGameMessage(`${board[a] === 'X' ? players.X : players.O} wins!`)
+        setGameMessage(`${players[board[a] === 'X' ? 0 : 1]} wins!`)
         return
       }
     }
@@ -323,7 +354,7 @@ export const TicTacToe = () => {
       })
       setGameMessage("It's a draw!")
     }
-  }
+  }, [gameState.board, socket, multiplayerState.roomId])
 
   // Reset the game
   const resetGame = () => {
@@ -336,11 +367,11 @@ export const TicTacToe = () => {
     // Local gameplay reset
     setGameState({
       board: Array(9).fill(null),
-      currentPlayer: 'X',
+      currentPlayer: 0,
       winner: null,
       status: 'playing'
     })
-    setGameMessage(`${players.X}'s turn`)
+    setGameMessage(`${players[0]}'s turn`)
   }
 
   // Toggle multiplayer mode
@@ -362,8 +393,10 @@ export const TicTacToe = () => {
       setMultiplayerState({
         isConnected: false,
         roomId: null,
+        gameType: 'tic-tac-toe',
         isCreator: false,
-        playerSymbol: null,
+        playerIndex: null,
+        playerInfo: null,
         opponentName: null,
         spectators: []
       })
@@ -381,8 +414,10 @@ export const TicTacToe = () => {
     setMultiplayerState({
       isConnected: false,
       roomId: null,
+      gameType: 'tic-tac-toe',
       isCreator: false,
-      playerSymbol: null,
+      playerIndex: null,
+      playerInfo: null,
       opponentName: null,
       spectators: []
     })
@@ -398,6 +433,30 @@ export const TicTacToe = () => {
     }
   }
 
+  // Updated function to handle player name change
+  const handlePlayerNameChange = (playerIndex: number, name: string) => {
+    setPlayers(prev => ({
+      ...prev,
+      [playerIndex]: name
+    }))
+  }
+
+  // Convert board data for rendering
+  const renderBoard = () => {
+    // For multiplayer, we might need to transform the board data
+    // based on the game type and player symbols
+    if (multiplayerState.roomId && gameState.board) {
+      // For Tic-Tac-Toe: convert the numeric player indices to X/O
+      return gameState.board.map((cell: any) => {
+        if (cell === null) return null;
+        return cell === 0 ? 'X' : 'O';
+      });
+    }
+
+    // For local play, the board already has X/O values
+    return gameState.board;
+  }
+
   return (
     <div className="bg-white p-6 rounded-lg shadow-lg max-w-md w-full">
       {/* Multiplayer Toggle */}
@@ -409,6 +468,13 @@ export const TicTacToe = () => {
           {showMultiplayer ? 'Local Mode' : 'Multiplayer Mode'}
         </button>
       </div>
+
+      {/* Game Type (currently only for TicTacToe) */}
+      {showMultiplayer && !multiplayerState.roomId && (
+        <div className="mb-2 text-center">
+          <span className="text-sm font-medium">Game: Tic-Tac-Toe</span>
+        </div>
+      )}
 
       {/* Multiplayer Options */}
       {showMultiplayer && !multiplayerState.roomId && (
@@ -498,10 +564,10 @@ export const TicTacToe = () => {
           {/* Player Info */}
           <p className="text-sm mt-1">
             You: {username}
-            {multiplayerState.playerSymbol && (
-              <span className="font-bold"> ({multiplayerState.playerSymbol})</span>
+            {multiplayerState.playerIndex !== null && multiplayerState.playerInfo && (
+              <span className="font-bold"> ({multiplayerState.playerInfo.symbol || ''})</span>
             )}
-            {!multiplayerState.playerSymbol && <span> (Spectator)</span>}
+            {multiplayerState.playerIndex === null && <span> (Spectator)</span>}
           </p>
 
           {/* Spectators */}
@@ -522,8 +588,8 @@ export const TicTacToe = () => {
             </label>
             <input
               type="text"
-              value={players.X}
-              onChange={(e) => handlePlayerNameChange('X', e.target.value)}
+              value={players[0]}
+              onChange={(e) => handlePlayerNameChange(0, e.target.value)}
               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
@@ -533,8 +599,8 @@ export const TicTacToe = () => {
             </label>
             <input
               type="text"
-              value={players.O}
-              onChange={(e) => handlePlayerNameChange('O', e.target.value)}
+              value={players[1]}
+              onChange={(e) => handlePlayerNameChange(1, e.target.value)}
               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
@@ -547,7 +613,11 @@ export const TicTacToe = () => {
       </div>
 
       {/* Game Board */}
-      <Board squares={gameState.board} onClick={handleClick} />
+      <Board
+        squares={renderBoard() as Player[]}
+        onClick={handleClick}
+        winningPattern={gameState.winningPattern}
+      />
 
       {/* Reset Button */}
       <div className="mt-6 text-center">
