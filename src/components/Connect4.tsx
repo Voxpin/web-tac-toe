@@ -375,32 +375,9 @@ export const Connect4 = () => {
     setGameMessage(`${players[gameState.currentPlayer === 0 ? 1 : 0]}'s turn`)
   }
 
-//   // Check if there's a winner (for local play only)
+  // Check if there's a winner (for local play only)
   useEffect(() => {
-    // if (socket && multiplayerState.roomId) return; // Skip for multiplayer games
-
-    // const winPatterns = [
-    //   [0, 1, 2], [3, 4, 5], [6, 7, 8], // rows
-    //   [0, 3, 6], [1, 4, 7], [2, 5, 8], // columns
-    //   [0, 4, 8], [2, 4, 6]             // diagonals
-    // ]
-
-    // for (const pattern of winPatterns) {
-    //   const [a, b, c] = pattern
-    //   const board = gameState.board
-
-    //   if (board[a] && board[a] === board[b] && board[a] === board[c]) {
-    //     setGameState({
-    //       ...gameState,
-    //       winner: board[a] === 'X' ? 0 : 1,
-    //       status: 'won',
-    //       winningPattern: pattern
-    //     })
-
-    //     setGameMessage(`${players[board[a] === 'X' ? 0 : 1]} wins!`)
-    //     return
-    //   }
-    // }
+   
 
     // Check for draw
     const isDraw = gameState.board.every(col => col.every(cell => cell !== null))
@@ -413,7 +390,7 @@ export const Connect4 = () => {
     }
   }, [gameState.board, socket, multiplayerState.roomId])
 
-//   // // Win-tjek
+  // // Win-tjek
 function checkGameOver(
   board: Player[][],
   lastCol: number,
@@ -421,6 +398,8 @@ function checkGameOver(
   player: Player
 ): { isOver: boolean; status: GameStatus; winner: Player | null; winningCells?: [number, number][] } | null {
   if (player === null) return null
+  const cols = board.length;
+  const rows = board[0].length;
   const directions = [
     [1, 0], // horisontal
     [0, 1], // vertikal
@@ -728,28 +707,28 @@ function checkGameOver(
             const currentPlayer = gameState.currentPlayer as Player; // Gem spilleren nu
             newBoard[col][realRow] = currentPlayer;
 
-            // const result = checkGameOver(
-            //     newBoard, 
-            //     col, 
-            //     realRow, 
-            //     currentPlayer
-            //     // gameState.currentPlayer as Player
-            // );
+            const result = checkGameOver(
+                newBoard, 
+                col, 
+                realRow, 
+                currentPlayer
+                // gameState.currentPlayer as Player
+            );
 
-            // if(result?.isOver) {
-            //     setGameState({
-            //         ...gameState,
-            //         board: newBoard,
-            //         winner: result.winner,
-            //         status: result.status,
-            //         winningPattern: result.winningCells
-            //     });
-            //     setGameMessage(
-            //     result.status === 'won'
-            //         ? `${players[currentPlayer]} wins!`
-            //         : "It's a draw!"
-            //     );
-            // }else {
+            if(result?.isOver) {
+                setGameState({
+                    ...gameState,
+                    board: newBoard,
+                    winner: result.winner,
+                    status: result.status,
+                    winningPattern: result.winningCells
+                });
+                setGameMessage(
+                result.status === 'won'
+                    ? `${players[currentPlayer]} wins!`
+                    : "It's a draw!"
+                );
+            }else {
 
             // Skift tur
             const nextPlayer = currentPlayer === 0 ? 1 : 0;
@@ -759,7 +738,7 @@ function checkGameOver(
                 currentPlayer: nextPlayer,
             });
             // setGameMessage(`${players[nextPlayer]}'s turn`);
-            // }
+            }
         }}
             
         />
