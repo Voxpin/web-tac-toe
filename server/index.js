@@ -4,6 +4,10 @@ const { Server } = require('socket.io');
 const cors = require('cors');
 const { v4: uuidv4 } = require('uuid');
 
+// Import game implementations
+const TicTacToeGame = require('./games/TicTacToeGame');
+const Connect4Game = require('./games/Connect4Game');
+
 const app = express();
 app.use(cors());
 const server = http.createServer(app);
@@ -16,6 +20,12 @@ const io = new Server(server, {
   }
 });
 
+// Game implementations registry
+const gameTypes = {
+  'tic-tac-toe': TicTacToeGame,
+  'connect4': Connect4Game,
+};
+
 // Game rooms storage
 const rooms = {};
 
@@ -24,28 +34,47 @@ io.on('connection', (socket) => {
   console.log(`User connected: ${socket.id}`);
 
   // Create a new game room
-  socket.on('createRoom', ({ username }) => {
+  socket.on('createRoom', ({ username, gameType = 'tic-tac-toe' }) => {
+    // Validate game type
+    if (!gameTypes[gameType]) {
+      socket.emit('error', { message: `Invalid game type: ${gameType}` });
+      return;
+    }
+
     const roomId = uuidv4().substring(0, 6); // Shorter ID for easier sharing
+    const GameClass = gameTypes[gameType];
+    const gameInstance = new GameClass();
+
+    // Initialize game state
+    const initialGameState = gameInstance.init();
+
+    // Setup player with game-specific properties
+    const playerSetup = gameInstance.getPlayerSetup(0); // First player (0-indexed)
 
     rooms[roomId] = {
       id: roomId,
+      gameType,
+      gameInstance,
       players: [{
         id: socket.id,
         username,
-        symbol: 'X'
+        index: 0, // Player index (0-indexed)
+        ...playerSetup
       }],
-      gameState: {
-        board: Array(9).fill(null),
-        currentPlayer: 'X',
-        winner: null,
-        status: 'waiting' // waiting for second player
-      },
+      gameState: initialGameState,
       spectators: []
     };
 
     socket.join(roomId);
-    console.log(`Room created: ${roomId} by ${username}`);
-    socket.emit('roomCreated', { roomId, symbol: 'X', gameState: rooms[roomId].gameState });
+    console.log(`Room created: ${roomId} by ${username}, game type: ${gameType}`);
+
+    socket.emit('roomCreated', {
+      roomId,
+      gameType,
+      playerIndex: 0,
+      playerInfo: playerSetup,
+      gameState: initialGameState
+    });
   });
 
   // Join an existing game room
@@ -57,9 +86,11 @@ io.on('connection', (socket) => {
     }
 
     const room = rooms[roomId];
+    const gameInstance = room.gameInstance;
+    const maxPlayers = gameInstance.getMaxPlayers();
 
-    // Check if room is full (for TicTacToe, max 2 players)
-    if (room.players.length >= 2) {
+    // Check if room is full
+    if (room.players.length >= maxPlayers) {
       // Add as spectator
       room.spectators.push({
         id: socket.id,
@@ -68,64 +99,76 @@ io.on('connection', (socket) => {
       socket.join(roomId);
       socket.emit('joinedAsSpectator', {
         roomId,
+        gameType: room.gameType,
         gameState: room.gameState,
-        players: room.players.map(p => ({ username: p.username, symbol: p.symbol }))
+        players: room.players.map(p => ({
+          username: p.username,
+          index: p.index,
+          ...p // Include game-specific player info (like symbol or color)
+        }))
       });
       io.to(roomId).emit('spectatorJoined', { username });
       return;
     }
 
-    // Add as second player
+    // Add as player
+    const playerIndex = room.players.length;
+    const playerSetup = gameInstance.getPlayerSetup(playerIndex);
+
     room.players.push({
       id: socket.id,
       username,
-      symbol: 'O'
+      index: playerIndex,
+      ...playerSetup
     });
 
-    // Update game status to playing
-    room.gameState.status = 'playing';
+    // Update game status to playing if we have enough players
+    if (room.players.length >= 2) {
+      room.gameState.status = 'playing';
+    }
 
     socket.join(roomId);
-    socket.emit('roomJoined', { roomId, symbol: 'O', gameState: room.gameState });
+    socket.emit('roomJoined', {
+      roomId,
+      gameType: room.gameType,
+      playerIndex,
+      playerInfo: playerSetup,
+      gameState: room.gameState
+    });
 
     // Notify all clients in the room about the new player
     io.to(roomId).emit('gameStart', {
       gameState: room.gameState,
-      players: room.players.map(p => ({ username: p.username, symbol: p.symbol }))
+      players: room.players.map(p => ({
+        username: p.username,
+        index: p.index,
+        ...p // Include game-specific player info
+      }))
     });
   });
 
   // Handle game moves
-  socket.on('makeMove', ({ roomId, index }) => {
+  socket.on('makeMove', ({ roomId, move }) => {
     if (!rooms[roomId]) return;
 
     const room = rooms[roomId];
     const player = room.players.find(p => p.id === socket.id);
 
     if (!player) return; // Not a player in the room
-    if (room.gameState.status !== 'playing') return; // Game not in progress
-    if (room.gameState.currentPlayer !== player.symbol) return; // Not this player's turn
-    if (room.gameState.board[index] !== null) return; // Square already filled
 
-    // Update the game board
-    const newBoard = [...room.gameState.board];
-    newBoard[index] = player.symbol;
+    const gameInstance = room.gameInstance;
+    const playerIndex = player.index;
 
-    // Update game state
-    room.gameState.board = newBoard;
-    room.gameState.currentPlayer = player.symbol === 'X' ? 'O' : 'X';
+    // Process the move through the game instance
+    const updatedGameState = gameInstance.makeMove(room.gameState, playerIndex, move);
 
-    // Check for winner
-    const winner = checkWinner(newBoard);
-    if (winner) {
-      room.gameState.winner = winner;
-      room.gameState.status = 'won';
-    } else if (!newBoard.includes(null)) {
-      room.gameState.status = 'draw';
+    // Only update state if the move was valid and changed the state
+    if (updatedGameState !== room.gameState) {
+      room.gameState = updatedGameState;
+
+      // Broadcast updated game state to all players in the room
+      io.to(roomId).emit('gameStateUpdate', { gameState: room.gameState });
     }
-
-    // Broadcast updated game state to all players in the room
-    io.to(roomId).emit('gameStateUpdate', { gameState: room.gameState });
   });
 
   // Handle game reset
@@ -133,14 +176,11 @@ io.on('connection', (socket) => {
     if (!rooms[roomId]) return;
 
     const room = rooms[roomId];
+    const gameInstance = room.gameInstance;
 
     // Reset game state
-    room.gameState = {
-      board: Array(9).fill(null),
-      currentPlayer: 'X',
-      winner: null,
-      status: 'playing'
-    };
+    room.gameState = gameInstance.init();
+    room.gameState.status = 'playing';
 
     // Broadcast reset to all players
     io.to(roomId).emit('gameReset', { gameState: room.gameState });
@@ -167,14 +207,14 @@ io.on('connection', (socket) => {
           delete rooms[roomId];
           console.log(`Room ${roomId} deleted (no players left)`);
         } else {
+          // Update game state
+          room.gameState.status = 'waiting';
+
           // Notify remaining users
           io.to(roomId).emit('playerDisconnected', {
             username: disconnectedPlayer.username,
-            symbol: disconnectedPlayer.symbol,
-            gameState: {
-              ...room.gameState,
-              status: 'waiting' // Set status back to waiting
-            }
+            playerIndex: disconnectedPlayer.index,
+            gameState: room.gameState
           });
         }
         break;
@@ -190,24 +230,6 @@ io.on('connection', (socket) => {
     }
   });
 });
-
-// Helper function to check for a winner
-function checkWinner(board) {
-  const winPatterns = [
-    [0, 1, 2], [3, 4, 5], [6, 7, 8], // rows
-    [0, 3, 6], [1, 4, 7], [2, 5, 8], // columns
-    [0, 4, 8], [2, 4, 6]             // diagonals
-  ];
-
-  for (const pattern of winPatterns) {
-    const [a, b, c] = pattern;
-    if (board[a] && board[a] === board[b] && board[a] === board[c]) {
-      return board[a];
-    }
-  }
-
-  return null;
-}
 
 // Start server
 const PORT = process.env.PORT || 3001;

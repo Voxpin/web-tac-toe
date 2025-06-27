@@ -1,21 +1,28 @@
 import React, { useState } from 'react'
 import './App.css'
 import TicTacToe from './components/TicTacToe'
+import Connect4 from './components/Connect4'
 
 function App() {
-  const [showGame, setShowGame] = useState(false)
+  const [game, setGame] = useState<string | null>(null)
 
   return (
     <div className="min-h-screen bg-gray-100 flex flex-col items-center justify-center p-4">
       <h1 className="text-4xl font-bold text-center mb-6">Choose a Game</h1>
       <div className="Games">
-        {!showGame ? (
-          <button className='Tic-Tac-Toe' onClick={() => setShowGame(true)}>
+        {!game && (
+          <>
+          <button className='Tic-Tac-Toe' onClick={() => setGame('TicTacToe')}>
             Tic Tac Toe
           </button>
-        ) : (
-          <TicTacToe />
+          <button className='Connect-4' onClick={() => setGame('Connect4')}>
+            Connect 4
+          </button>
+          </>
+          
         )}
+        {game === 'TicTacToe' && <TicTacToe />}
+        {game === 'Connect4' && <Connect4 />}
       </div>
 
       {/* <div className=" text-sm text-gray-600 text-center w-full pb-4">

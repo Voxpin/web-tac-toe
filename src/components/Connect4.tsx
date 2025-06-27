@@ -2,14 +2,14 @@ import { useState, useEffect, useCallback } from 'react'
 import { io, Socket } from 'socket.io-client'
 
 // Types for our game
-type Player = 'X' | 'O' | null
+type Player = 1 | 0 | null
 type GameStatus = 'playing' | 'won' | 'draw' | 'waiting'
 type GameState = {
-  board: Player[]
+  board: Player[][]
   currentPlayer: number
   winner: Player | number | null
   status: GameStatus
-  winningPattern?: number[] | null
+  winningPattern?: [number,number][] | null
 }
 
 // Types for multiplayer
@@ -32,43 +32,92 @@ type MultiplayerState = {
 }
 
 // Component for an individual square on the board
-const Square = ({ value, onClick, highlight = false }: { value: Player; onClick: () => void; highlight?: boolean }) => {
+const Cell = ({ 
+    Player,
+    highlight = false,
+
+}:{
+    Player: Player
+    highlight?: boolean
+}) => {
+    let bgColoer = 'gray';
+    if (Player === 0) {
+        bgColoer = 'red';
+    } else if (Player === 1) {
+        bgColoer = 'yellow';
+    }
   return (
-    <button
-      className={`aspect-square border border-gray-400 text-6xl font-bold flex items-center justify-center
-                 bg-white text-black hover:bg-gray-100 transition-colors ${highlight ? 'bg-yellow-200' : ''}`}
-      onClick={onClick}
+    
+    <div
+        style={{ 
+            backgroundColor: bgColoer,
+            width : '64px',
+            height: '64px',
+         }}
+      className={`w-16 h-16  border-2 border-gray-400 text-6xl font-bold flex items-center justify-center
+                   ${highlight ? 'ring-4 ring-green-400' : ''}`
+                }
     >
-      {value}
-    </button>
+
+    </div>
+      
   )
 }
 
 // Component for the game board
-const Board = ({
-  squares,
+const Connect4Board = ({
+  board,
   onClick,
   winningPattern
 }: {
-  squares: Player[];
-  onClick: (i: number) => void;
-  winningPattern?: number[] | null
+  board: Player[][] // 2D array [row][col];
+  onClick: (col: number) => void;
+  winningPattern?: [number, number][] // array of [row, col]
 }) => {
+    
+    const cols = board.length;
+    const rows = board[0].length || 0;
+
   return (
-    <div className="grid grid-cols-3 w-full max-w-sm gap-[5px] mx-auto">
-      {squares.map((square, i) => (
-        <Square
-          key={i}
-          value={square}
-          onClick={() => onClick(i)}
-          highlight={winningPattern?.includes(i)}
-        />
-      ))}
+    <div className="flex flex-col items-center space-y-1">
+        {/* Column click buttons */}
+        <div className='grid grid-cols-7 gap-2 mb-2'>
+           {Array.from({length: cols}).map((_, col) => (
+            <button
+              key={col}
+              className='h-16 w-16 bg-blue-200 hover:bg-blue-400 rounded text-white font-bold'
+            onClick={() => onClick(col)}
+           >
+                ▼
+           </button>
+            ))}
+      
+        </div>
+        {/* Game grid */}
+     <div className={`grid grid-cols-${cols} gap-3`}>
+        {Array.from({length: rows}).map((_, rowIndex) => 
+        Array.from({length: cols}).map((_, colIndex) => {
+            const cell = board[colIndex][rowIndex];
+            const ishighlight = winningPattern?.some(
+                ([c, r]) => c === colIndex && r === rowIndex
+            );
+            return (
+                <Cell
+                key={`${rowIndex}-${colIndex}`}
+                Player={cell}
+                highlight={ishighlight}
+                />
+            );
+        })
+    )}
+
+     </div>
     </div>
+
   )
 }
 
-export const TicTacToe = () => {
+export const Connect4 = () => {
   // Socket connection
   const [socket, setSocket] = useState<Socket | null>(null)
 
@@ -76,7 +125,7 @@ export const TicTacToe = () => {
   const [multiplayerState, setMultiplayerState] = useState<MultiplayerState>({
     isConnected: false,
     roomId: null,
-    gameType: 'tic-tac-toe',
+    gameType: 'Connect 4',
     isCreator: false,
     playerIndex: null,
     playerInfo: null,
@@ -92,7 +141,7 @@ export const TicTacToe = () => {
 
   // Game state
   const [gameState, setGameState] = useState<GameState>({
-    board: Array(9).fill(null),
+    board: Array(7).fill(null).map(() => Array(6).fill(null)), // 7 columns, 6 rows
     currentPlayer: 0,
     winner: null,
     status: 'playing'
@@ -106,6 +155,13 @@ export const TicTacToe = () => {
 
   // Game message
   const [gameMessage, setGameMessage] = useState<string>(`${players[0]}'s turn`)
+
+  useEffect(() => {
+    if (gameState.status === 'playing') {
+      setGameMessage(`${players[gameState.currentPlayer]}'s turn`);
+    }
+  }, [gameState.currentPlayer, gameState.status, players]);
+  
 
   // Connect to Socket.io server
   useEffect(() => {
@@ -321,33 +377,11 @@ export const TicTacToe = () => {
 
   // Check if there's a winner (for local play only)
   useEffect(() => {
-    if (socket && multiplayerState.roomId) return; // Skip for multiplayer games
-
-    const winPatterns = [
-      [0, 1, 2], [3, 4, 5], [6, 7, 8], // rows
-      [0, 3, 6], [1, 4, 7], [2, 5, 8], // columns
-      [0, 4, 8], [2, 4, 6]             // diagonals
-    ]
-
-    for (const pattern of winPatterns) {
-      const [a, b, c] = pattern
-      const board = gameState.board
-
-      if (board[a] && board[a] === board[b] && board[a] === board[c]) {
-        setGameState({
-          ...gameState,
-          winner: board[a] === 'X' ? 0 : 1,
-          status: 'won',
-          winningPattern: pattern
-        })
-
-        setGameMessage(`${players[board[a] === 'X' ? 0 : 1]} wins!`)
-        return
-      }
-    }
+   
 
     // Check for draw
-    if (!gameState.board.includes(null)) {
+    const isDraw = gameState.board.every(col => col.every(cell => cell !== null))
+    if (isDraw) {
       setGameState({
         ...gameState,
         status: 'draw'
@@ -355,6 +389,51 @@ export const TicTacToe = () => {
       setGameMessage("It's a draw!")
     }
   }, [gameState.board, socket, multiplayerState.roomId])
+
+  // // Win-tjek
+function checkGameOver(
+  board: Player[][],
+  lastCol: number,
+  lastRow: number,
+  player: Player
+): { isOver: boolean; status: GameStatus; winner: Player | null; winningCells?: [number, number][] } | null {
+  if (player === null) return null
+  const cols = board.length;
+  const rows = board[0].length;
+  const directions = [
+    [1, 0], // horisontal
+    [0, 1], // vertikal
+    [1, 1], // diagonal /
+    [1, -1], // diagonal \
+  ]
+  for (const [dx, dy] of directions) {
+    let winningCells: [number, number][] = [[lastCol, lastRow]]
+    for (const dir of [1, -1]) {
+      let x = lastCol + dx * dir
+      let y = lastRow + dy * dir
+      while (
+        x >= 0 &&
+        x < cols &&
+        y >= 0 &&
+        y < rows &&
+        board[x][y] === player
+      ) {
+        winningCells.push([x, y])
+        x += dx * dir
+        y += dy * dir
+      }
+    }
+    if (winningCells.length >= 4) {
+      return {
+        isOver: true,
+        status: 'won',
+        winner: player,
+        winningCells,
+      }
+    }
+  }
+  return null;
+}
 
   // Reset the game
   const resetGame = () => {
@@ -366,7 +445,7 @@ export const TicTacToe = () => {
 
     // Local gameplay reset
     setGameState({
-      board: Array(9).fill(null),
+      board: Array(7).fill(null).map(() => Array(6).fill(null)), // 7 columns, 6 rows
       currentPlayer: 0,
       winner: null,
       status: 'playing'
@@ -613,11 +692,56 @@ export const TicTacToe = () => {
       </div>
 
       {/* Game Board */}
-      <Board
-        squares={renderBoard() as Player[]}
-        onClick={handleClick}
-        winningPattern={gameState.winningPattern}
-      />
+      <Connect4Board
+        board={gameState.board}
+        onClick={(col) => {
+        // Find nederste ledige plads i kolonnen
+        if (gameState.status !== 'playing') return;
+          
+            const colArr = gameState.board[col];
+            const realRow = colArr.lastIndexOf(null); // Find nederste ledige plads
+            if (realRow === -1) return; // Kolonne fuld
+
+            // Deep copy af boardet
+            const newBoard = gameState.board.map((c, i) => [...c]);
+            const currentPlayer = gameState.currentPlayer as Player; // Gem spilleren nu
+            newBoard[col][realRow] = currentPlayer;
+
+            const result = checkGameOver(
+                newBoard, 
+                col, 
+                realRow, 
+                currentPlayer
+                // gameState.currentPlayer as Player
+            );
+
+            if(result?.isOver) {
+                setGameState({
+                    ...gameState,
+                    board: newBoard,
+                    winner: result.winner,
+                    status: result.status,
+                    winningPattern: result.winningCells
+                });
+                setGameMessage(
+                result.status === 'won'
+                    ? `${players[currentPlayer]} wins!`
+                    : "It's a draw!"
+                );
+            }else {
+
+            // Skift tur
+            const nextPlayer = currentPlayer === 0 ? 1 : 0;
+            setGameState({
+                ...gameState,
+                board: newBoard,
+                currentPlayer: nextPlayer,
+            });
+            // setGameMessage(`${players[nextPlayer]}'s turn`);
+            }
+        }}
+            
+        />
 
       {/* Reset Button */}
       <div className="mt-6 text-center">
@@ -640,4 +764,4 @@ export const TicTacToe = () => {
   )
 }
 
-export default TicTacToe
+export default Connect4
